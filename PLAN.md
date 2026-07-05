@@ -1,6 +1,6 @@
-# Execution Plan: Book-Agentic-RAG (From Scratch)
+# Execution Plan: Book-Agentic-RAG (From Scratch - 100% Local)
 
-This document serves as the step-by-step roadmap for building a modular, agentic RAG backend specialized in technical PDF books. Built from scratch using Python, FastAPI, LangGraph, LangChain, and Qdrant (Docker), this architecture emphasizes manual control and deterministic orchestration over high-level abstractions.
+This document serves as the step-by-step roadmap for building a modular, agentic RAG backend specialized in technical PDF books. Built from scratch using Python, FastAPI, LangGraph, LangChain, and Qdrant (Docker), this architecture focuses entirely on closed-domain local retrieval with no external internet dependencies.
 
 ---
 
@@ -12,7 +12,7 @@ The goal is to set up the project scaffolding, environment isolation, and basic 
   - Configure the virtual environment using your preferred package manager (`uv` or `poetry`).
   - Install core dependencies: `fastapi`, `uvicorn`, `langgraph`, `langchain-core`, `langchain-openai`, `pydantic`, `python-dotenv`.
 - [ ] **Step 1.2: Configuration & Environment Isolation**
-  - Create a `.env` file to securely store `OPENAI_API_KEY`, `EXA_API_KEY`, and `QDRANT_URL`.
+  - Create a `.env` file to securely store `OPENAI_API_KEY` and `QDRANT_URL`.
   - Code `app/config.py` using `pydantic-settings` or native `os.environ` to type-check and validate credentials at application startup.
 - [ ] **Step 1.3: Base Endpoints with FastAPI**
   - Write `app/main.py` and instantiate the FastAPI application.
@@ -46,13 +46,12 @@ Configuring the atomic components that your graph orchestrator will explicitly m
   - Design the graph state structure inheriting from `TypedDict`.
   - Define mandatory keys for the execution's short-term memory:
     - `messages`: A cumulative list managing the chronological conversation flow (`list[BaseMessage]`).
-    - `context_pool`: A list of structured dictionaries where retrieval nodes will store fetched book passages or web results.
+    - `context_pool`: A list of structured dictionaries where retrieval nodes will store fetched book passages.
 - [ ] **Step 3.2: Tool Encapsulation**
-  - Wrap the Qdrant retrieval function under LangChain's `@tool` decorator, writing an exhaustive docstring explaining exactly when the LLM should invoke it.
-  - Create `app/tools/web_search.py` wrapping the `Exa` or `Tavily` API with strict filters to restrict external queries to academic or engineering sources if local vector data falls short.
+  - Wrap the Qdrant retrieval function under LangChain's `@tool` decorator, writing an exhaustive docstring explaining exactly how the LLM should pass queries to extract the correct book data.
 - [ ] **Step 3.3: Binding LLMs to Tool Schemas**
   - In `app/core/graph.py`, initialize the OpenAI Chat Model.
-  - Use the `.bind_tools([...])` method, passing your hand-coded tools list to enable deterministic Tool Calling via structured JSON responses.
+  - Use the `.bind_tools([...])` method, passing your hand-coded local textbook search tool to enable deterministic Tool Calling via structured JSON responses.
 
 ---
 
@@ -60,13 +59,13 @@ Configuring the atomic components that your graph orchestrator will explicitly m
 Wiring the standalone python functions into a controlled state-machine loop.
 
 - [ ] **Step 4.1: Hand-Coding Independent Nodes**
-  - **Router/Agent Node:** Passes the current state messages to the LLM with bound tools, saving the response (including potential `tool_calls`) back to the state.
-  - **Tools Execution Node:** Reads the state, extracts requested tool calls, executes the respective functions (Qdrant or Web) concurrently, and commits clean results to the `context_pool`.
+  - **Router/Agent Node:** Passes the current state messages to the LLM with bound tools, saving the response (including potential `tool_calls` for local book lookup) back to the state.
+  - **Local Tools Execution Node:** Reads the state, extracts requested book lookup calls, executes the Qdrant vector retrieval function, and commits clean results to the `context_pool`.
   - **Final Generator Node:** Gathers all accumulated `context_pool` data and `messages`, injects them into a strict "Academic Book Assistant" system prompt (`app/core/prompts.py`), calls the LLM for the final answer, and flushes the context pool.
 - [ ] **Step 4.2: Conditional Edge Logic**
   - Write the routing decision function (`should_continue`). This inspects the latest agent message inside the state:
-    - If it contains `tool_calls`, it routes directly to the tools execution node.
-    - If no tool calls are present, it transitions to the final generator node to close the loop.
+    - If it contains a `tool_call` to search the book library, it routes directly to the local tools execution node.
+    - If no tool calls are present (or context is already gathered), it transitions to the final generator node to close the loop.
 - [ ] **Step 4.3: Graph Assembly & Compilation**
   - Instantiate `StateGraph(YourStateSchema)`.
   - Register nodes explicitly via `.add_node()`.
@@ -88,4 +87,4 @@ Connecting the core engine with the web interface to support persistent sessions
   - Configure the execution context payload: `config={"configurable": {"thread_id": payload.thread_id}}` to guarantee complete session isolation.
 - [ ] **Step 5.3: Manual Integration Testing**
   - Launch the local development server (`uvicorn app.main:app --reload`).
-  - Use an HTTP client to fire sequential, complex queries to test conversation memory retention and deterministic tool switching between book lookups and web searches.
+  - Use an HTTP client to fire sequential queries to test conversation memory retention and verify that if a concept is not in the books, the agent explicitly and safely states it does not know, rather than guessing.
