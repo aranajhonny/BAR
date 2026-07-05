@@ -1,90 +1,50 @@
-# Execution Plan: Book-Agentic-RAG (From Scratch - 100% Local)
+# PLAN — BAR as a learning vehicle
 
-This document serves as the step-by-step roadmap for building a modular, agentic RAG backend specialized in technical PDF books. Built from scratch using Python, FastAPI, LangGraph, LangChain, and Qdrant (Docker), this architecture focuses entirely on closed-domain local retrieval with no external internet dependencies.
+This document isn't a product roadmap. It's a log of what I want to understand about LangChain, LangGraph, and Python by building something real, in the order it makes sense to learn it. Each phase has a comprehension goal, not just a feature.
 
----
+## Why this project instead of a tutorial
 
-## 🛠️ Phase 1: Environment, Base Architecture & API Server
-The goal is to set up the project scaffolding, environment isolation, and basic communication endpoints without any agentic logic yet.
+Copying a RAG tutorial teaches you to paste blocks of code that already work. This project is meant to run the other way: pick a closed domain (my own technical books) where I can actually notice when retrieval fails, when the router picks wrong, and why — because I know the content by heart and can audit every answer against the original text.
 
-- [ ] **Step 1.1: Workspace Initialization**
-  - Create the modular directory structure: `app/core`, `app/tools`, `app/api`, and `scripts/`.
-  - Configure the virtual environment using your preferred package manager (`uv` or `poetry`).
-  - Install core dependencies: `fastapi`, `uvicorn`, `langgraph`, `langchain-core`, `langchain-openai`, `pydantic`, `python-dotenv`.
-- [ ] **Step 1.2: Configuration & Environment Isolation**
-  - Create a `.env` file to securely store `OPENAI_API_KEY` and `QDRANT_URL`.
-  - Code `app/config.py` using `pydantic-settings` or native `os.environ` to type-check and validate credentials at application startup.
-- [ ] **Step 1.3: Base Endpoints with FastAPI**
-  - Write `app/main.py` and instantiate the FastAPI application.
-  - Design the Pydantic schema for the incoming payload (e.g., `{"message": "...", "thread_id": "..."}`).
-  - Implement an asynchronous `POST /v1/chat` endpoint that initially returns a generic JSON confirmation.
+## Phase 0 — Foundations already running
 
----
+- [x] Basic `StateGraph` with three nodes (Router → Retrieval → Generation)
+- [x] PDF ingestion with small-to-big chunking
+- [x] Local Qdrant with metadata (`book_title`, `chapter_number`, `page`)
+- [x] Streamed response via FastAPI
 
-## 📚 Phase 2: High-Density Ingestion (RAG Pipeline for Books)
-Processing extensive textbooks requires strict token context management and highly structured metadata extraction by chapter and section.
+## Phase 1 — Actually understanding LangGraph, not just using it
 
-- [ ] **Step 2.1: Vector Infrastructure Setup**
-  - Spin up a local Qdrant instance via Docker (`docker run -p 6333:6333...`).
-  - Access the Qdrant Web Dashboard (port 6333) to verify the service is up and running.
-- [ ] **Step 2.2: Extensible Extraction & Ingestion Script (`scripts/ingest.py`)**
-  - Program the PDF parser to process files in page-batches (using `PyMuPDF` or `pdfplumber`) to avoid RAM bottlenecks.
-  - Implement a *Hierarchical Chunking* or *Small-to-Big Chunking* strategy:
-    - Generate granular sub-chunks (~200-300 tokens) for sharp semantic vector matching.
-    - Map each sub-chunk explicitly to a "Parent Chunk" (~1000-1200 tokens) that contains the broader surrounding context.
-  - Inject mandatory structured metadata into every vector payload: `book_title`, `chapter_number`, `chapter_title`, `page_start`, `page_end`.
-- [ ] **Step 2.3: Strict Retrieval Module**
-  - Write `app/tools/vector_db.py`.
-  - Create an asynchronous query function that connects to the Qdrant collection, runs a cosine similarity search, and returns only the clean "Parent Chunks" paired with their source metadata.
+- [ ] Write the end-to-end smoke test (query → retrieval → generation) *before* adding any more nodes. Without this, every change to the graph is a guess.
+- [ ] Instrument each node with input/output state logging — I want to *see* what the Router decides and why, not assume it.
+- [ ] Deliberately provoke a case where the Router picks the wrong book/chapter, and figure out whether it's a prompt problem, a schema problem, or poor metadata.
+- [ ] Read the actual source of `langgraph.graph.StateGraph` (not just the docs) to understand how state propagates between nodes — it's the piece I understand least right now.
 
----
+## Phase 2 — Retrieval, beyond "it works"
 
-## 🧠 Phase 3: State, Tools & LLM Binding
-Configuring the atomic components that your graph orchestrator will explicitly manipulate.
+- [ ] Measure retrieval precision against a small set of questions with known answers (I build the ground truth myself, since I know the books).
+- [ ] Experiment with chunk size (200 → 100 → 400 tokens) and see the real, not theoretical, impact on answer quality.
+- [ ] Try reranking (cross-encoder) after the cosine search, and decide with data whether the extra complexity is worth it.
 
-- [ ] **Step 3.1: Central State Definition (`app/core/state.py`)**
-  - Design the graph state structure inheriting from `TypedDict`.
-  - Define mandatory keys for the execution's short-term memory:
-    - `messages`: A cumulative list managing the chronological conversation flow (`list[BaseMessage]`).
-    - `context_pool`: A list of structured dictionaries where retrieval nodes will store fetched book passages.
-- [ ] **Step 3.2: Tool Encapsulation**
-  - Wrap the Qdrant retrieval function under LangChain's `@tool` decorator, writing an exhaustive docstring explaining exactly how the LLM should pass queries to extract the correct book data.
-- [ ] **Step 3.3: Binding LLMs to Tool Schemas**
-  - In `app/core/graph.py`, initialize the OpenAI Chat Model.
-  - Use the `.bind_tools([...])` method, passing your hand-coded local textbook search tool to enable deterministic Tool Calling via structured JSON responses.
+## Phase 3 — Real conversational memory
 
----
+- [ ] Persist `thread_id` using LangGraph's native checkpointing (`MemorySaver` → later a persistent backend) instead of rebuilding history by hand.
+- [ ] Understand the difference between graph state and conversation memory — LangGraph blends the two, and I want to separate them clearly in my head.
 
-## 🕸️ Phase 4: Deterministic Graph Orchestration (LangGraph Core)
-Wiring the standalone python functions into a controlled state-machine loop.
+## Phase 4 — Getting off the OpenAI dependency (optional, curiosity-driven)
 
-- [ ] **Step 4.1: Hand-Coding Independent Nodes**
-  - **Router/Agent Node:** Passes the current state messages to the LLM with bound tools, saving the response (including potential `tool_calls` for local book lookup) back to the state.
-  - **Local Tools Execution Node:** Reads the state, extracts requested book lookup calls, executes the Qdrant vector retrieval function, and commits clean results to the `context_pool`.
-  - **Final Generator Node:** Gathers all accumulated `context_pool` data and `messages`, injects them into a strict "Academic Book Assistant" system prompt (`app/core/prompts.py`), calls the LLM for the final answer, and flushes the context pool.
-- [ ] **Step 4.2: Conditional Edge Logic**
-  - Write the routing decision function (`should_continue`). This inspects the latest agent message inside the state:
-    - If it contains a `tool_call` to search the book library, it routes directly to the local tools execution node.
-    - If no tool calls are present (or context is already gathered), it transitions to the final generator node to close the loop.
-- [ ] **Step 4.3: Graph Assembly & Compilation**
-  - Instantiate `StateGraph(YourStateSchema)`.
-  - Register nodes explicitly via `.add_node()`.
-  - Wire the flow using `.add_edge()` for fixed transitions and `.add_conditional_edges()` for branching logic based on `should_continue`.
-  - Set the primary entry point via `.set_entry_point()`.
-  - Compile the graph layout by calling `.compile()`.
+- [ ] Swap embeddings for a local model (e.g. `bge-small` via `sentence-transformers`) and compare retrieval quality against `text-embedding-3-small`.
+- [ ] Try a local LLM via Ollama for generation, and measure where the quality gap actually shows up on longer answers.
+- [ ] If this works well, the "100% local" label stops being aspirational.
 
----
+## Phase 5 — Things I want to break on purpose
 
-## 💾 Phase 5: Persistence Layer, Streaming & API Integration
-Connecting the core engine with the web interface to support persistent sessions and multi-user chat threads.
+- [ ] Feed in a PDF that contradicts another book in the library and see how the agent handles (or doesn't handle) the contradiction.
+- [ ] Ask something outside the library and confirm the system admits "I don't know" instead of hallucinating — this is the project's core honesty test.
+- [ ] Push a very long thread and see where context handling degrades.
 
-- [ ] **Step 5.1: Memory Saver Checkpointer**
-  - Import and instantiate LangGraph's native `MemorySaver`.
-  - Pass the checkpointer instance during graph compilation to ensure state persistence in RAM indexed by session IDs.
-- [ ] **Step 5.2: Final Wiring in FastAPI**
-  - Update the endpoint created in Phase 1 (`app/main.py`).
-  - Import the compiled graph and call it asynchronously using `.astream()` or `.ainvoke()`.
-  - Configure the execution context payload: `config={"configurable": {"thread_id": payload.thread_id}}` to guarantee complete session isolation.
-- [ ] **Step 5.3: Manual Integration Testing**
-  - Launch the local development server (`uvicorn app.main:app --reload`).
-  - Use an HTTP client to fire sequential queries to test conversation memory retention and verify that if a concept is not in the books, the agent explicitly and safely states it does not know, rather than guessing.
+## Notes to self
+
+- Don't add a new feature without writing the test that validates it first. I already did this with Vlk² — documented capabilities the code didn't back up — and I want the opposite habit here from day one.
+- This README and this plan should always state the true current status of the code, even when it's less impressive. The goal is learning, not selling myself the project.
+- If at any point this stops feeling like learning and starts feeling like a race toward a roadmap, that's a sign I'm fooling myself about what this repo is for.

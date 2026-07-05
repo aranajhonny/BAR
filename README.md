@@ -1,52 +1,61 @@
-# Book Agentic RAG Backend (100% Local RAG)
+# BAR — Book Agentic RAG
 
-A lightweight, production-ready agentic RAG backend engineered specifically for navigating and studying dense, comprehensive technical textbooks and PDF material. Built completely by hand without black-box abstractions, using **Python, FastAPI, LangGraph, and Qdrant**.
+There's a question that haunts anyone trying to study a dense technical textbook: where exactly was that idea I read three chapters ago? BAR exists because of that friction. It's an agentic RAG backend, closed over your own PDF library, built to answer that precisely — never to make something up.
 
-This backend operates as a completely **closed-domain system**. It does not connect to the internet or external search engines. The agent's intelligence is strictly bounded by the explicit text, chapters, and knowledge contained within your uploaded PDF library.
+This isn't a product. It's a deliberate exercise: actually learning LangChain and LangGraph by building something that uses them for real, instead of copying a tutorial. Python, FastAPI, LangGraph, and Qdrant are the playground.
 
-## 🚀 Technical Stack
+## Philosophy
 
-- **Orchestration & State Machine:** `langgraph` (Explicit Node & Edge execution topology)
-- **LLM & Tool Binding Abstractions:** `langchain-core` / `langchain-openai`
-- **Vector Infrastructure:** `Qdrant` (Running via local Docker container for high-performance semantic storage)
-- **API Framework:** `FastAPI` (Asynchronous endpoints supporting live execution streaming)
+The agent lives inside a strict boundary: it only knows what you gave it to read. No web search, no leaking into the model's general knowledge. If the answer isn't in your books, the system admits it instead of filling the gap with a confident hallucination. That restriction isn't a limitation — it's the whole point of the design.
 
----
+## The stack, and why
 
-## 📐 Architecture Flow
+- **LangGraph** as the orchestration engine: an explicit `StateGraph` with nodes and edges you could sketch on a whiteboard before writing a line of code.
+- **LangChain core / langchain-openai** for structured tool-calling.
+- **Qdrant** as the vector memory, running locally in Docker.
+- **FastAPI** as the entry point, with async streaming.
 
-The system operates as a State Machine Graph (`StateGraph`), evaluating queries against a strict local topology:
+Worth saying plainly: this project uses frameworks on purpose. The goal is understanding LangGraph from the inside — its nodes, its shared state, its routing decisions — not avoiding it to prove some kind of technical purity. The craftsmanship is in the graph and retrieval design, not in rejecting the tooling.
 
-1. **User Input:** Accepts queries alongside a unique `thread_id` to persist chat history across interactions.
-2. **Agent/Router Node:** Evaluates the user query using structured JSON Tool Calling schemas to determine which books or chapters to scan.
-3. **Local Retrieval Node:** Performs cosine similarity lookups over dense book vectors stored in Qdrant. Returns high-density parent chunks bundled with strict metadata tracking (Title, Chapter, Page).
-4. **Consolidation & Generation Node:** Merges the local `context_pool` with active thread messages, feeding an advanced Academic Synthesizer prompt to generate the streaming output. If no information is found in the local library, the agent safely reports the absence of data rather than hallucinating.
+## How the graph thinks
 
----
-
-## 🗂️ Project Scaffolding
-
-```text
-├── app/
-│   ├── api/             # FastAPI routing layers and endpoints
-│   ├── core/            # Core Agent Engine (graph.py, state.py, prompts.py)
-│   ├── database/        # Connection setups and structural schemas
-│   ├── tools/           # Custom tool handlers (vector_db.py)
-│   └── config.py        # Environment variables type validation
-├── scripts/
-│   └── ingest.py        # High-density PDF chunking and indexing script
-├── .env                 # Local secrets and API credentials storage
-├── plan.md              # Technical execution step-by-step checklist
-└── pyproject.toml       # Environment lock and dependency manifest
+```
+User query + thread_id
+        │
+        ▼
+   Router Node          (structured tool-calling: which book, which chapter?)
+        │
+        ▼
+   Retrieval Node        (cosine similarity over Qdrant, small-chunk lookup
+        │                 → expanded to parent chunk)
+        ▼
+   Generation Node        (merges retrieved context + thread history,
+                            streams the answer)
 ```
 
----
+If retrieval finds nothing relevant, the generation node is instructed to say so plainly, not improvise.
 
-## 🛠️ Getting Started
+## Project layout
 
-### 1. Clone & Environment Configuration
+```
+├── app/
+│   ├── api/          # FastAPI routes
+│   ├── core/         # graph.py, state.py, prompts.py
+│   ├── database/     # connection + schema
+│   ├── tools/         # vector_db.py and other tool handlers
+│   └── config.py      # env var validation
+├── scripts/
+│   └── ingest.py       # PDF chunking + indexing
+├── tests/
+│   └── test_graph_smoke.py   # end-to-end: query → retrieval → generation
+├── .env
+├── PLAN.md
+└── pyproject.toml
+```
 
-Clone the repository and set up your Python virtual environment:
+## Getting started
+
+### 1. Clone and set up the environment
 
 ```bash
 git clone <your-repository-url>
@@ -54,62 +63,54 @@ cd book-agentic-rag
 
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt  # Or use your preferred package manager (uv/poetry)
+pip install -r requirements.txt   # or uv / poetry
 ```
 
-### 2. Set Up Environment Variables
+### 2. Environment variables
 
-Create a `.env` file in the root directory:
+Create `.env` in the project root:
 
-```env
+```
 OPENAI_API_KEY=your_openai_key_here
 QDRANT_URL=http://localhost:6333
 ```
 
-### 3. Spin Up Vector Database
+Honest caveat: embeddings and generation currently go through the OpenAI API. "Closed" here means knowledge is bounded to your library, not that inference runs 100% on your machine. If that matters to you as a next learning step, swapping in a local embedding model plus a local LLM (Ollama, say) is a natural extension — it's in PLAN.md.
 
-Launch the local Qdrant container:
+### 3. Spin up Qdrant
 
 ```bash
 docker run -p 6333:6333 -p 6334:6334 -v $(pwd)/qdrant_storage:/qdrant/storage:z qdrant/qdrant
 ```
 
-Access the native web dashboard instantly at [http://localhost:6333/dashboard](http://localhost:6333/dashboard).
+Dashboard: http://localhost:6333/dashboard
 
-### 4. Run Textbook Ingestion
+### 4. Ingest your PDFs
 
-Place your technical PDFs in your data folder and index them into Qdrant:
+Drop your PDFs into the data folder, then:
 
 ```bash
 python scripts/ingest.py
 ```
 
-### 5. Launch the Server
-
-Boot the FastAPI application backend:
+### 5. Run the server
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
----
+## Design decisions worth understanding
 
-## 🎯 Key Design Implementations (Built by Hand)
+**Small-to-big chunking.** Qdrant indexes short chunks (~200 tokens) because they're better for similarity search. But a chunk that small, on its own, starves the answer of context — so retrieval expands each hit to its full parent chunk (~1200 tokens) before it reaches the prompt. Precision in the search, richness in the context.
 
-### Small-to-Big Chunking
+**Bounded knowledge.** No web search tool is bound to the agent. The system prompt forces it to answer only from the retrieved `context_pool`. This is a design and prompting constraint, not a hard technical guarantee against hallucination — worth keeping in mind while learning where the real limits of this technique sit.
 
-Eliminates LLM context fragmentation. The vector database indexes optimized, short text pieces (~200 tokens) to achieve maximum retrieval accuracy, while the custom tool extracts the full surrounding Parent Chunk (~1200 tokens) to provide rich context to the prompt window.
+**Metadata slicing.** Every vector carries `book_title`, `chapter_number`, and `page`, so the Router node can constrain a search to a specific book or chapter when the query implies it.
 
-### Strict Bounded Knowledge
+## Status
 
-No external search engine web hooks. The agent is strictly instructed to evaluate only the injected contexts, ensuring zero external hallucinations and complete information privacy.
+Early stage, on purpose: retrieval and generation work end-to-end, but test coverage today is a single smoke test (see `tests/`). See PLAN.md for the rest of the learning path.
 
-### Metadata Slicing
+## License
 
-Ingested books are indexed with explicit layer tokens (`book_title`, `chapter_number`, `page`). This permits programmatic context slicing based on conversational constraints.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License.
+MIT
