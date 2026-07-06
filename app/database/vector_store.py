@@ -68,6 +68,4 @@ class VectorStore:
         )
         return result.points
 
-
-# Instancia singleton para uso desde scripts
 store = VectorStore()
